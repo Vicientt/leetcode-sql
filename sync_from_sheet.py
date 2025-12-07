@@ -9,14 +9,12 @@ from google.oauth2.service_account import Credentials
 
 def slugify(text: str) -> str:
     text = text.strip().lower()
-    # replace non-alphanumeric with underscore
     text = re.sub(r"[^a-z0-9]+", "_", text)
-    # remove leading/trailing underscores
-    text = text.strip("_")
-    return text or "untitled"
+    return text.strip("_") or "untitled"
 
 
 def main():
+    # Load credentials
     sheet_id = os.environ["SHEET_ID"]
     creds_info = json.loads(os.environ["GOOGLE_CREDENTIALS"])
 
@@ -24,43 +22,54 @@ def main():
     creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
     gc = gspread.authorize(creds)
 
-    # Open sheet & first worksheet
+    # Open Sheet
     sh = gc.open_by_key(sheet_id)
     ws = sh.sheet1
 
-    # Read all rows as dicts using header row
+    # Read all data as dict rows
     rows = ws.get_all_records()
 
+    # Prepare folder
     base_dir = Path("sql")
     base_dir.mkdir(exist_ok=True)
+
+    # Extract header to detect topic columns
+    header = ws.row_values(1)
+
+    # Identify topic columns: everything after "Code"
+    topic_columns = header[2:]  # Title = col1, Code = col2, topics from col3+
 
     changed_files = []
 
     for row in rows:
         title = row.get("Title") or row.get("title")
-        folder = row.get("Folder") or row.get("folder")
         code = row.get("Code") or row.get("code")
 
         # Skip incomplete rows
-        if not title or not folder or not code:
+        if not title or not code:
             continue
 
-        folder_slug = slugify(folder)
-        file_slug = slugify(title) + ".sql"
+        filename = slugify(title) + ".sql"
 
-        topic_dir = base_dir / folder_slug
-        topic_dir.mkdir(parents=True, exist_ok=True)
+        # Process topic columns
+        for topic in topic_columns:
+            raw_val = str(row.get(topic, "")).strip().lower()
 
-        file_path = topic_dir / file_slug
+            if raw_val in ("true", "1", "yes"):
+                folder = slugify(topic)
+                topic_dir = base_dir / folder
+                topic_dir.mkdir(parents=True, exist_ok=True)
 
-        # Only write if content changed
-        if file_path.exists():
-            old = file_path.read_text(encoding="utf-8")
-            if old == code:
-                continue
+                file_path = topic_dir / filename
 
-        file_path.write_text(code, encoding="utf-8")
-        changed_files.append(str(file_path))
+                # Only write if changed
+                if file_path.exists():
+                    old_content = file_path.read_text(encoding="utf-8")
+                    if old_content == code:
+                        continue
+
+                file_path.write_text(code, encoding="utf-8")
+                changed_files.append(str(file_path))
 
     print(f"Updated {len(changed_files)} files.")
     if changed_files:

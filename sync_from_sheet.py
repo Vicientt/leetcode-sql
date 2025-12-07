@@ -26,32 +26,32 @@ def main():
     sh = gc.open_by_key(sheet_id)
     ws = sh.sheet1
 
-    # Read all data as dict rows
+    # Read all rows
     rows = ws.get_all_records()
 
-    # Prepare folder
     base_dir = Path("sql")
     base_dir.mkdir(exist_ok=True)
 
-    # Extract header to detect topic columns
-    header = ws.row_values(1)
+    # Metadata columns to ignore for topics
+    metadata_cols = {"Title", "Code", "Level"}
 
-    # Identify topic columns: everything after "Code"
-    topic_columns = header[2:]  # Title = col1, Code = col2, topics from col3+
+    # All topic columns = header minus metadata
+    header = ws.row_values(1)
+    topic_columns = [h for h in header if h not in metadata_cols]
 
     changed_files = []
 
     for row in rows:
-        title = row.get("Title") or row.get("title")
-        code = row.get("Code") or row.get("code")
+        title = row.get("Title")
+        code = row.get("Code")
 
-        # Skip incomplete rows
+        # skip empty rows
         if not title or not code:
             continue
 
         filename = slugify(title) + ".sql"
 
-        # Process topic columns
+        # Loop over all topic checkboxes
         for topic in topic_columns:
             raw_val = str(row.get(topic, "")).strip().lower()
 
@@ -62,7 +62,6 @@ def main():
 
                 file_path = topic_dir / filename
 
-                # Only write if changed
                 if file_path.exists():
                     old_content = file_path.read_text(encoding="utf-8")
                     if old_content == code:
